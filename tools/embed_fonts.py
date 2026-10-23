@@ -1,5 +1,7 @@
 """Usage: python3 tools/embed_fonts.py "Шаблон презентации.pptx" in.pptx out.pptx
-Copy embedded Wix Madefor Display fonts from the template into a pptx (fntdata parts + embeddedFontLst)."""
+Copy embedded Wix Madefor Display fonts from the template into a pptx (fntdata parts + embeddedFontLst).
+Needed only for decks built from scratch (DESIGN.md §0.3). If fonts are already embedded
+(deck built from the template, §0.2), the file is copied unchanged."""
 import sys, zipfile, re, shutil
 tpl, src, out = sys.argv[1:4]
 T = zipfile.ZipFile(tpl); Z = zipfile.ZipFile(src)
@@ -7,6 +9,9 @@ tpres = T.read('ppt/presentation.xml').decode(); trels = T.read('ppt/_rels/prese
 lst = re.search(r'<p:embeddedFontLst>.*?</p:embeddedFontLst>', tpres, re.S).group(0)
 rids = re.findall(r'r:id="(rId\d+)"', lst)
 pres = Z.read('ppt/presentation.xml').decode(); rels = Z.read('ppt/_rels/presentation.xml.rels').decode()
+if '<p:embeddedFontLst>' in pres or any(n.startswith('ppt/fonts/') for n in Z.namelist()):
+    # deck was built from the template (§0.2): fonts are already embedded, adding them again breaks the file
+    Z.close(); shutil.copy(src, out); print('fonts already embedded, copied as is'); sys.exit()
 ct = Z.read('[Content_Types].xml').decode()
 used = set(int(x) for x in re.findall(r'Id="rId(\d+)"', rels)); nxt = max(used) + 100
 files = {}
