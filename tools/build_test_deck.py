@@ -11,7 +11,7 @@ SRC, OUT = sys.argv[1], sys.argv[2]
 import os
 LOGO_WHITE = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'assets', 'logo', 'logo-mono-white.png')
 prs = Presentation(SRC)
-ORDER = [21, 46, 43, 75, 16, 67, 78, 59, 81, 84, 69, 47, 92]
+ORDER = [21, 50, 42, 78, 16, 71, 82, 63, 85, 91, 73, 51, 99]   # номера слайдов шаблона (100 слайдов)
 
 # --- keep only chosen slides, in order; drop template comments
 sldIdLst = prs.slides._sldIdLst
@@ -87,16 +87,16 @@ def placeholder(slide, sid, label, round_=False, white=False):
     pic._element.addprevious(shp._element)          # keep z-order
     pic._element.getparent().remove(pic._element)
 
-def style_tag(shape, accent=False):
-    """Tag per DESIGN.md §5.1: pill h=0.24in, 0.75pt accent1 outline, 8pt text; accent=True -> filled accent1, text lt1."""
-    shape.height = Emu(int(0.24 * 914400))
-    shape.fill.solid() if accent else shape.fill.background()
-    if accent: shape.fill.fore_color.theme_color = MSO_THEME_COLOR.ACCENT_1
-    shape.line.width = Pt(0.75); shape.line.color.theme_color = MSO_THEME_COLOR.ACCENT_1
+def style_tag(shape, big=True):
+    """Tag per DESIGN.md §6.1. big=True: 0.35in pill, 0.75pt #727272 outline, 8pt #727272 (speaker regalia).
+    big=False: small tag, 0.32in, #FF5C00 outline and text (time, format, date)."""
+    shape.height = Emu(int((0.35 if big else 0.32) * 914400))
+    shape.fill.background()
+    col = RGBColor(0x72, 0x72, 0x72) if big else RGBColor(0xFF, 0x5C, 0x00)
+    shape.line.width = Pt(0.75); shape.line.color.rgb = col
     for p in shape.text_frame.paragraphs:
         for r in p.runs:
-            r.font.size = Pt(8)
-            r.font.color.theme_color = MSO_THEME_COLOR.BACKGROUND_1 if accent else MSO_THEME_COLOR.ACCENT_1
+            r.font.size = Pt(8); r.font.color.rgb = col
 
 def delete(slide, sid):
     el = find(slide, sid)._element; el.getparent().remove(el)
@@ -113,7 +113,7 @@ for sh in list(sl.shapes):
         new = sl.shapes.add_picture(LOGO_WHITE, sh.left, sh.top, height=sh.height)
         sh._element.addprevious(new._element); sh._element.getparent().remove(sh._element)
 
-# 2 — спикер (46)
+# 2 — спикер (50)
 sl = s[1]
 placeholder(sl, 566, '[фото спикера]')
 placeholder(sl, 567, '[QR-код]', round_=True, white=True)
@@ -124,20 +124,23 @@ set_text(find(sl, 572), ['Лера Вишневская']); find(sl, 572).width 
 set_text(find(sl, 573), [['Руководитель образовательных продуктов soft skills в Яндексе']])
 r573 = find(sl, 573); r573.width = Emu(int(3.82*914400))
 for r in r573.text_frame.paragraphs[0].runs: r.font.size = Pt(12)
-# tags: outline + one accent (DESIGN.md §5.1), widths fit text, gap 0.1in
+# big tags (DESIGN.md §6.1): width fits text, gap 0.06in
 x = Emu(int(0.543*914400))
-for sid, w, acc in ((570, 0.723, False), (571, 0.835, True)):
-    tg = find(sl, sid); style_tag(tg, accent=acc); tg.left = x; tg.top = Emu(int(1.029*914400)); tg.width = Emu(int(w*914400))
-    x = tg.left + tg.width + Emu(int(0.1*914400))
+for sid, w in ((570, 0.80), (571, 1.00)):
+    tg = find(sl, sid); style_tag(tg, big=True); tg.left = x; tg.top = Emu(int(1.029*914400)); tg.width = Emu(int(w*914400))
+    x = tg.left + tg.width + Emu(int(0.06*914400))
 
-# 3 — план эфира (43)
+# 3 — план эфира (42, PL1)
 sl = s[2]
-set_text(find(sl, 541), ['план эфира'])
-for sid, lines in zip((531, 534, 537, 540), (['Разбор', 'на примерах'], ['Возражения', 'бизнеса'],
-                                              ['Чек-лист', 'критериев'], ['Ответы', 'на вопросы'])):
-    set_text(find(sl, sid), [lines])
+set_text(find(sl, 505), ['план эфира'])
+for (t_id, d_id), (title, desc) in zip(((11, 12), (40, 41), (44, 45), (48, 49)),
+        (('Разбор на примерах', 'Как защищают бюджет в реальных компаниях'),
+         ('Возражения бизнеса', 'Что отвечают CEO и финдиректору в этом сезоне'),
+         ('Чек-лист критериев', 'Соберем критерии сильной защиты в один список'),
+         ('Ответы на вопросы', 'Разберем вопросы участников из регистрации'))):
+    set_text(find(sl, t_id), [title]); set_text(find(sl, d_id), [desc])
 
-# 4 — кому полезно (75)
+# 4 — кому полезно (78)
 sl = s[3]
 set_text(find(sl, 875), ['аудитория'])
 set_text(find(sl, 857), [['Кому', 'будет', 'полезно']])
