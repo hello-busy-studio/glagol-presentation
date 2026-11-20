@@ -9,6 +9,8 @@ Usage:
 """
 import collections, math, os, re, sys, zipfile
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 EMU = 914400
 W, H = 9144000, 5143500
@@ -21,7 +23,10 @@ PALETTE = {
     "E5EBF5", "5E8EDD", "F3F3F3", "D9D9D9", "C6C6C6", "FFBE99",                                          # служебные
     "EFEFEF", "F4CCCC", "444746", "D0D0D0", "C8C8C8",                                                    # из шаблона
 }
-SCALE = {6, 7, 8, 9, 10, 11, 12, 16, 20, 22, 30, 37, 48, 60, 96}   # §3.2 (+60 — эмодзи §5.9)
+SCALE = {6, 7, 8, 9, 10, 11, 12, 16, 20, 22, 24, 30, 36, 37, 48, 60, 96,   # §3.2 (+60 — эмодзи §5.9; 36/30/24 — заголовки)
+         13, 14, 15, 18, 21, 27, 28, 32, 44, 45, 64}                        # кегли вариантов дизайнера (§7, слайды 101+)
+SHORT = ("в во без до из к ко на над о об обо от по под при про с со у для за и а но да или либо не ни "
+         "что как").split()
 FONTS = {"Wix Madefor Display", "Wix Madefor Display Medium", "Wix Madefor Display SemiBold",
          "Wix Madefor Display ExtraBold"}
 FILLERS = [  # тексты-заглушки шаблона (§10, п. 8)
@@ -60,7 +65,7 @@ def top_shapes(xml):
             if depth == 0:
                 j = m.start() + t.end()
                 break
-        end = body.find(">", j) + 1
+        end = j                      # t.end() уже стоит за «>» закрывающего тега
         s = body[m.start():end]
         i = end
         off = re.search(r'<a:off x="(-?\d+)" y="(-?\d+)"/><a:ext cx="(\d+)" cy="(\d+)"', s)
@@ -97,8 +102,8 @@ def text_fit(R, n, s, fonts_dir):
         from PIL import ImageFont
     except ImportError:
         return
-    if 'wrap="none"' in s or "<a:spAutoFit/>" in s or "<a:normAutofit" in s:
-        return
+    if 'wrap="none"' in s or "<a:normAutofit" in s:
+        return                      # spAutoFit не спасает: PowerPoint пересчитывает высоту только при правке
     off = re.search(r'<a:ext cx="(\d+)" cy="(\d+)"', s)
     if not off:
         return
@@ -115,7 +120,7 @@ def text_fit(R, n, s, fonts_dir):
     for p in paras:
         t = re.sub(r"<[^>]+>", "", re.sub(r"<a:br>.*?</a:br>|<a:br/>", "\n", p, flags=re.S))
         sz = re.search(r' sz="(\d+)"', p)
-        size = int(sz.group(1)) / 100 if sz else 18
+        size = int(sz.group(1)) / 100 if sz else 14
         tf = re.search(r'<a:latin typeface="([^"]+)"', p)
         face = (tf.group(1) if tf else "Wix Madefor Display").replace("Wix Madefor Display", "").strip() or "Regular"
         path = os.path.join(fonts_dir, f"WixMadeforDisplay-{face}.ttf")
@@ -139,6 +144,63 @@ def text_fit(R, n, s, fonts_dir):
         n_lines += lines
     if n_lines > 1 and total > h_pt * 1.1 + 2:
         R.add("W", "текст, похоже, не помещается в свою плашку по высоте (§6.5.1)", n)
+
+
+def spacing_check(R, n, xml):
+    """Система отступов §4.1: отступы карточки равны со всех сторон, заголовок ближе к тексту, чем край,
+    внешний отступ больше внутреннего."""
+    try:
+        import spacing
+        cs = spacing.cards(xml)
+        els = spacing.elements(xml)
+    except Exception:
+        return
+    sets = {}
+    for c in cs:
+        k = c["card"]
+        sets.setdefault((round(k["r"] - k["l"], 1), round(k["b"] - k["t"], 1)), []).append(c)
+    for c in cs:
+        k, pad = c["card"], c["left"]
+        if c["nav"]:
+            R.add("W", "карточка заходит под стрелки навигации — низ карточек ≤ 4.70 (§4)", n)
+        if c["centered"]:
+            continue  # проверяется по набору ниже
+        if c["bottom"] < pad - 0.04:
+            R.add("W", "в карточке снизу отступ меньше, чем слева: последняя строка прижата к краю (§4.1)", n)
+        if abs(c["top"] - pad) > 0.05:
+            R.add("W", "в карточке отступ сверху не равен отступу слева (§4.1)", n)
+        for a, b, g in c["gaps"]:
+            if g < spacing.min_gap(b["size"]):
+                R.add("W", "в карточке текст налезает или почти касается текста над ним (§4.1)", n)
+            elif not a.get("short") and a["size"] > b["size"] and g >= pad - 0.01:
+                R.add("W", "в карточке зазор «заголовок → текст» не меньше внутреннего отступа карточки (§4.1)", n)
+        for e in els:
+            if e["kind"] != "text" or any(e in o["items"] for o in cs):  # соседние карточки и их текст — ряд блоков (§4)
+                continue
+            if e["t"] < 0.75 and e["size"] <= 10:
+                continue  # метка раздела стоит по сетке (§6.2)
+            if e["l"] >= k["l"] - 0.02 and e["r"] <= k["r"] + 0.02 and e["t"] >= k["t"] - 0.02 and e["b"] <= k["b"] + 0.02:
+                continue  # внутри карточки (декор)
+            if e["l"] < k["l"] and e["r"] > k["r"] and e["t"] < k["t"] and e["b"] > k["b"]:
+                continue  # подложка или рамка вокруг
+            dx = max(k["l"] - e["r"], e["l"] - k["r"], 0)
+            dy = max(k["t"] - e["b"], e["t"] - k["b"], 0)
+            d = max(dx, dy) if (dx == 0 or dy == 0) else None
+            if d is not None and d < pad - 0.01:
+                R.add("W", "внешний отступ от карточки до соседнего элемента меньше её внутреннего отступа (§4.1)", n)
+                break
+    for group in sets.values():
+        cen = [c for c in group if c["centered"]]
+        if cen:  # ряд карточек с текстом по центру: у самой полной поля сверху и снизу равны
+            full = min(cen, key=lambda c: c["bottom"])
+            if abs(full["top"] - full["bottom"]) > 0.06:
+                R.add("W", "в карточке с текстом по центру отступы сверху и снизу не равны (§4.1)", n)
+        group = [c for c in group if not (c["centered"] or c["pinned"] or c["paired"])]
+        if not group:
+            continue
+        pad = min(c["left"] for c in group)
+        if min(c["bottom"] for c in group) > pad + 0.1:
+            R.add("W", "в карточке пустой хвост снизу: отступ снизу больше бокового — уменьши высоту набора (§4.1)", n)
 
 
 def check(path, template=None, fonts_dir=None):
@@ -198,10 +260,50 @@ def check(path, template=None, fonts_dir=None):
         if any(s < 6 for s in sizes):
             R.add("E", "текст мельче 6 pt (§3.2)", i)
         for s in sorted(sizes - SCALE):
-            if s >= 6:
+            if s != int(s):
+                R.add("E", f"дробный кегль {s:g} pt — только целые (§3.2)", i)
+            elif s >= 6:
                 R.add("W", f"кегль {s:g} pt вне шкалы §3.2", i)
+        # Интервалы §3.2: заголовки 0,8, остальное 1,0
+        for p in re.findall(r"<a:p>.*?</a:p>|<a:p .*?</a:p>", xml, re.S):
+            szs = [int(v) / 100 for v in re.findall(r'<a:rPr[^>]* sz="(\d+)"', p)]
+            spc = re.search(r'<a:lnSpc><a:spcPct val="(\d+)"', p)
+            if not szs or not spc or not "".join(texts(p)).strip() or max(szs) == 60:
+                continue
+            want = 80000 if max(szs) >= 30 else 100000
+            if int(spc.group(1)) != want:
+                R.add("W", "межстрочный интервал: заголовки 0,8, остальной текст 1,0 (§3.2)", i)
+                break
+        # Набор §3.3: ручные переносы, висячие предлоги, подчёркивания
+        if "<a:br>" in xml or "<a:br/>" in xml or "\x0b" in xml or "&#11;" in xml:
+            R.add("W", "ручной перенос строки (Shift+Enter) — перенос задаёт ширина поля (§3.3)", i)
+        plain = " ".join(texts(xml))
+        if re.search(r"(?<![\w-])(%s) " % "|".join(SHORT + [w.capitalize() for w in SHORT]), plain):
+            R.add("W", "после предлогов и союзов обычный пробел — нужен неразрывный (§3.3)", i)
+        for rpr in re.findall(r"<a:rPr[^>]*\bu=\"(?!none)[^\"]+\"[^>]*>(?:(?!</a:rPr>).)*", xml, re.S):
+            if "hlinkClick" not in rpr:
+                R.add("W", "подчёркивание не у ссылки — подчёркиваем только ссылки (§3.3)", i)
+                break
+        # Метка раздела в одной точке 0.45, 0.39 (§6.2)
+        for tag, sx, x, y, cx, cy in top_shapes(xml):
+            if tag != "sp" or y > 0.7 * EMU or x > 1.2 * EMU or 'sz="1000"' not in sx or not "".join(texts(sx)).strip():
+                continue
+            if ("FF5C00" in sx or 'val="accent1"' in sx) and (abs(x / EMU - 0.45) > 0.04 or abs(y / EMU - 0.39) > 0.04):
+                R.add("W", f"метка раздела не на 0.45, 0.39 (стоит на {x / EMU:.2f}, {y / EMU:.2f}) (§6.2)", i)
+        # Тени темы (§0.1)
+        for el in re.findall(r"<p:(?:sp|cxnSp)>.*?</p:(?:sp|cxnSp)>", xml, re.S):
+            er = re.search(r'<a:effectRef idx="(\d+)"', el)
+            if er and er.group(1) != "0" and "<a:effectLst" not in el.split("<p:style>")[0]:
+                R.add("E", "у фигуры или линии тень темы — сними (shadow.inherit = False / пустой effectLst) (§0.1)", i)
+                break
+        # «Подгонять размер фигуры под текст» у текстовых полей (§0.1)
+        for el in re.findall(r"<p:sp>.*?</p:sp>", xml, re.S):
+            if 'txBox="1"' in el and "".join(texts(el)).strip() and "<a:spAutoFit/>" not in el:
+                R.add("W", "у текстового поля выключено «Подгонять размер фигуры под текст» (§0.1)", i)
+                break
         # Цвета
-        cols = {c.upper() for c in re.findall(r'<a:srgbClr val="([0-9A-Fa-f]{6})"', xml)}
+        xml_c = re.sub(r"<a:effectLst>.*?</a:effectLst>|<p:style>.*?</p:style>", "", xml, flags=re.S)  # мягкие тени дизайнера и стили
+        cols = {c.upper() for c in re.findall(r'<a:srgbClr val="([0-9A-Fa-f]{6})"', xml_c)}
         if "000000" in cols:
             R.add("E", "чистый чёрный #000000 — используй #1A1A1A (§2)", i)
         for c in sorted(cols - PALETTE - {"000000"}):
@@ -262,6 +364,8 @@ def check(path, template=None, fonts_dir=None):
         for s in re.findall(r"<p:sp>.*?</p:sp>", xml, re.S):
             if "<p:txBody>" in s and "".join(texts(s)).strip():
                 text_fit(R, i, s, fonts_dir)
+
+        spacing_check(R, i, xml)
 
     if order and notes == 0:
         R.add("W", "нет ни одной заметки спикера — проверь, были ли они в исходнике (сценарий Б)")
